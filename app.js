@@ -14,7 +14,7 @@ const saltRounds = 10;
 app.use(express.urlencoded({ extended: true }));
 
 //Initialise connect-redis
-const session = require('express-session');
+const session = require("express-session");
 const RedisStore = require("connect-redis")(session);
 
 app.use(
@@ -48,53 +48,51 @@ app.get("/", (req, res) => {
 app.post("/", (req, res) => {
   const { username, password } = req.body;
 
+  if (!username || !password) {
+    res.render("error", {
+      message: "Please set both username and password",
+    });
+    return;
+  }
+
   const saveSessionAndRenderDashboard = (userid) => {
-    res.session.userid = userid;
-    res.session.save();
+    req.session.userid = userid;
+    req.session.save();
     res.render("dashboard");
   };
+  const handleSignup = (username, password) => {
+    //signup procedure
+    client.incr("userid", async (err, userid) => {
+      client.hset("users", username, userid);
+      const saltRounds = 10;
+      const hash = await bcrypt.hash(password, saltRounds);
 
-//   if (!username || !password) {
-//     res.render("error", {
-//       message: "Please set both username and password",
-//     });
-//     return;
-//   }
-
-  console.log(req.body, username, password);
-
+      client.hset(`user:${userid}`, "hash", hash, "username", username);
+      saveSessionAndRenderDashboard(userid);
+    });
+  };
+  const handleLogin = (userid, password) => {
+    client.hget(`user:${userid}`, "hash", async (err, hash) => {
+      const result = await bcrypt.compare(password, hash);
+      if (result) {
+        saveSessionAndRenderDashboard(userid);
+      } else {
+        res.render("error", {
+          message: "Incorrect password",
+        });
+        return;
+      }
+    });
+  };
   client.hget("users", username, (err, userid) => {
     if (!userid) {
       //signup procedure
-      console.log(1);
-      client.incr("userid", async (err, userid) => {
-        client.hset("users", username, userid);
-        console.log(2);
-        const saltRounds = 10;
-        const hash = await bcrypt.hash(password, saltRounds);
-
-        client.hset(`user:${userid}`, "hash", hash, "username", username);
-        console.log(3);
-        saveSessionAndRenderDashboard(userid);
-      });
+      handleSignup(username, password);
     } else {
       //login procedure
-      console.log(4);
-      client.hget(`user:${userid}`, "hash", async (err, hash) => {
-        const result = await bcrypt.compare(password, hash);
-        if (result) {
-          saveSessionAndRenderDashboard(userid);
-        } else {
-          res.render("error", {
-            message: "Incorrect password",
-          });
-          return;
-        }
-      });
+      handleLogin(userid, password);
     }
   });
-
-  res.end();
 });
 
 //SERVER
