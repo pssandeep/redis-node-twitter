@@ -1,6 +1,7 @@
 const express = require("express");
 const app = express();
 const path = require("path");
+require("log-timestamp");
 
 //Initialise databases
 const redis = require("redis");
@@ -38,7 +39,22 @@ app.set("views", path.join(__dirname, "views"));
 //GET
 app.get("/", (req, res) => {
   if (req.session.userid) {
-    res.render("dashboard");
+    client.hget(
+      `user:${req.session.userid}`,
+      "username",
+      (err, currentUserName) => {
+        client.smembers(`following:${currentUserName}`, (err, following) => {
+          client.hkeys("users", (err, users) => {
+            res.render("dashboard", {
+              users: users.filter(
+                (user) =>
+                  user !== currentUserName && following.indexOf(user) === -1
+              ),
+            });
+          });
+        });
+      }
+    );
   } else {
     res.render("login");
   }
@@ -58,7 +74,7 @@ app.post("/", (req, res) => {
   const saveSessionAndRenderDashboard = (userid) => {
     req.session.userid = userid;
     req.session.save();
-    res.render("dashboard");
+    res.redirect("/");
   };
   const handleSignup = (username, password) => {
     //signup procedure
@@ -96,30 +112,58 @@ app.post("/", (req, res) => {
 });
 
 //DISPLAY FORM TO INPUT MESSAGE
-app.get('/post', (req, res) => {
-    if (req.session.userid) {
-      res.render('post')
-    } else {
-      res.render('login')
-    }
-  });
+app.get("/post", (req, res) => {
+  if (req.session.userid) {
+    res.render("post");
+  } else {
+    res.render("login");
+  }
+});
 
 //POST MESSAGE
-app.post('/post', (req, res) => {
-    if (!req.session.userid) {
-      res.render('login')
-      return
-    }
-    
-    const { message } = req.body
-    
-    client.incr('postid', async (err, postid) => {
-      client.hmset(`post:${postid}`, 'userid', req.session.userid, 'message', message, 'timestamp', Date.now())
-      res.render('dashboard')
-    })
-  });
+app.post("/post", (req, res) => {
+  if (!req.session.userid) {
+    res.render("login");
+    return;
+  }
 
+  const { message } = req.body;
+
+  client.incr("postid", async (err, postid) => {
+    client.hmset(
+      `post:${postid}`,
+      "userid",
+      req.session.userid,
+      "message",
+      message,
+      "timestamp",
+      Date.now()
+    );
+    res.redirect("/");
+  });
+});
+
+//FOLLOW USER
+app.post("/follow", (req, res) => {
+  if (!req.session.userid) {
+    res.render("login");
+    return;
+  }
+
+  const { username } = req.body;
+
+  client.hget(
+    `user:${req.session.userid}`,
+    "username",
+    (err, currentUserName) => {
+      client.sadd(`following:${currentUserName}`, username);
+      client.sadd(`followers:${username}`, currentUserName);
+    }
+  );
+
+  res.redirect("/");
+});
 //SERVER
-app.listen(3000, () =>
-  console.log("server started and running at port 3000...")
-);
+app.listen(3000, () => {
+  console.log("server started and running at port 3000...");
+});

@@ -6,3 +6,12 @@ block body
             | Welcome
         a(href='/post' action = 'POST')
             | Post a message
+        h3
+            | Follow someone new
+        ul
+            each user in users
+                li
+                    form(action='/follow' method='POST')
+                        input(type='hidden' name='username' value=user)
+                        button(type='submit')
+                            =user
