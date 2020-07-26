@@ -95,6 +95,30 @@ app.post("/", (req, res) => {
   });
 });
 
+//DISPLAY FORM TO INPUT MESSAGE
+app.get('/post', (req, res) => {
+    if (req.session.userid) {
+      res.render('post')
+    } else {
+      res.render('login')
+    }
+  });
+
+//POST MESSAGE
+app.post('/post', (req, res) => {
+    if (!req.session.userid) {
+      res.render('login')
+      return
+    }
+    
+    const { message } = req.body
+    
+    client.incr('postid', async (err, postid) => {
+      client.hmset(`post:${postid}`, 'userid', req.session.userid, 'message', message, 'timestamp', Date.now())
+      res.render('dashboard')
+    })
+  });
+
 //SERVER
 app.listen(3000, () =>
   console.log("server started and running at port 3000...")
