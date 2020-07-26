@@ -2,7 +2,8 @@ const express = require("express");
 const app = express();
 const path = require("path");
 require("log-timestamp");
-
+//Promisify
+const { promisify } = require("util");
 //Initialise databases
 const redis = require("redis");
 const client = redis.createClient();
@@ -10,6 +11,9 @@ const client = redis.createClient();
 //password hashing
 const bcrypt = require("bcrypt");
 const saltRounds = 10;
+
+//date functions
+const { formatDistance } = require("date-fns");
 
 //set url encodeed to true
 app.use(express.urlencoded({ extended: true }));
@@ -36,25 +40,46 @@ app.use(
 app.set("view engine", "pug");
 app.set("views", path.join(__dirname, "views"));
 
+const ahget = promisify(client.hget).bind(client);
+const asmembers = promisify(client.smembers).bind(client);
+const ahkeys = promisify(client.hkeys).bind(client);
+const aincr = promisify(client.incr).bind(client);
+const alrange = promisify(client.lrange).bind(client);
+
 //GET
-app.get("/", (req, res) => {
+app.get("/", async (req, res) => {
   if (req.session.userid) {
-    client.hget(
+    const currentUserName = await ahget(
       `user:${req.session.userid}`,
-      "username",
-      (err, currentUserName) => {
-        client.smembers(`following:${currentUserName}`, (err, following) => {
-          client.hkeys("users", (err, users) => {
-            res.render("dashboard", {
-              users: users.filter(
-                (user) =>
-                  user !== currentUserName && following.indexOf(user) === -1
-              ),
-            });
-          });
-        });
-      }
+      "username"
     );
+    const following = await asmembers(`following:${currentUserName}`);
+    const users = await ahkeys("users");
+
+    const timeline = [];
+    const posts = await alrange(`timeline:${currentUserName}`, 0, 100);
+
+    for (post of posts) {
+      const timestamp = await ahget(`post:${post}`, "timestamp");
+      const timeString = formatDistance(
+        new Date(),
+        new Date(parseInt(timestamp))
+      );
+
+      timeline.push({
+        message: await ahget(`post:${post}`, "message"),
+        author: await ahget(`post:${post}`, "username"),
+        timeString: timeString,
+      });
+    }
+
+    res.render("dashboard", {
+      users: users.filter(
+        (user) => user !== currentUserName && following.indexOf(user) === -1
+      ),
+      currentUserName,
+      timeline,
+    });
   } else {
     res.render("login");
   }
@@ -121,26 +146,34 @@ app.get("/post", (req, res) => {
 });
 
 //POST MESSAGE
-app.post("/post", (req, res) => {
+app.post("/post", async (req, res) => {
   if (!req.session.userid) {
     res.render("login");
     return;
   }
 
   const { message } = req.body;
+  const currentUserName = await ahget(`user:${req.session.userid}`, "username");
+  const postid = await aincr("postid");
+  client.hmset(
+    `post:${postid}`,
+    "userid",
+    req.session.userid,
+    "username",
+    currentUserName,
+    "message",
+    message,
+    "timestamp",
+    Date.now()
+  );
+  client.lpush(`timeline:${currentUserName}`, postid);
 
-  client.incr("postid", async (err, postid) => {
-    client.hmset(
-      `post:${postid}`,
-      "userid",
-      req.session.userid,
-      "message",
-      message,
-      "timestamp",
-      Date.now()
-    );
-    res.redirect("/");
-  });
+  const followers = await asmembers(`followers:${currentUserName}`);
+  for (follower of followers) {
+    client.lpush(`timeline:${follower}`, postid);
+  }
+
+  res.redirect("/");
 });
 
 //FOLLOW USER

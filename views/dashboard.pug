@@ -15,3 +15,15 @@ block body
                         input(type='hidden' name='username' value=user)
                         button(type='submit')
                             =user
+        if timeline.length > 0
+            h3
+                | Latest posts
+            div(class='sm:rounded-lg')
+                table
+                    tbody
+                        each message in timeline
+                            tr
+                                td
+                                    =message.message
+                                    p
+                                        | #{message.author}, #{message.timeString} ago                            
